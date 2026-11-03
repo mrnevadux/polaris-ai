@@ -1,0 +1,57 @@
+name: Build Polaris
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Installer les dépendances
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Télécharger le modèle vocal français (Vosk)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip" -OutFile model.zip
+          Expand-Archive model.zip -DestinationPath model_tmp
+          Move-Item model_tmp/vosk-model-small-fr-0.22 model
+          Remove-Item model.zip, model_tmp -Recurse -Force
+          if (-not (Test-Path "model/am")) { throw "Modèle vocal incomplet" }
+
+      - name: Tests (logique, sans interface)
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+
+      - name: Vérifier les imports
+        shell: pwsh
+        run: python -c "import customtkinter, vosk, sounddevice, psutil, win32com.client, google.genai, pypdf, send2trash; print('imports OK')"
+
+      - name: Compiler Polaris.exe
+        shell: pwsh
+        run: python build.py
+
+      - name: Vérifier que dist/Polaris.exe existe
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/Polaris.exe")) { throw "dist/Polaris.exe est introuvable" }
+          $mb = [math]::Round((Get-Item dist/Polaris.exe).Length / 1MB, 1)
+          Write-Host "Polaris.exe : $mb Mo"
+
+      - name: Publier l'artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Polaris-Windows11
+          path: dist/Polaris.exe
+          if-no-files-found: error
